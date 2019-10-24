@@ -1,0 +1,49 @@
+html, section, main, header, footer, body{
+    float: left;
+    width: 100%;
+    margin: 1% 0 1% 0;
+}
+
+
+.controlItemSection{
+    float: right;
+    margin: 1% 1% 1% 1%;
+    width: auto;
+}
+.controlItemPanelSection{
+    float: right;
+    width: auto;
+}
+
+.dataInputer_dataSet{
+    margin: 0;
+    background-color: rgb(230,230,230);
+}
+
+.dataInputer_dataSet_x{
+    text-align: center;
+    background-color: rgb(250, 200, 200);
+}
+.dataInputer_dataSet_y{
+    text-align: center;
+    background-color: rgb(200,200,250);
+}
+
+.dataInputer_dataSet_x_input{
+    padding: 0;
+    margin: 0% 1% 0% 1%;
+    border: 0;
+}
+.dataInputer_dataSet_y_input{
+    padding: 0;
+    margin: 0% 1% 0% 1%;
+    border: 0;
+}
+.networkSetter{
+    background-color: rgb(230, 230, 230);
+}
+.networkSetter_input{
+    padding: 0;
+    border: 0;
+    margin: 2% 1% 2% 1%;
+}

@@ -11,6 +11,18 @@ function gaussianRandom(){
 }
 
 /**
+ * 
+ * @param {Array} list 
+ */
+function clone(list){
+    let retVal = new Array(list.length);
+    for(let i = 0; i < list.length; i ++){
+        retVal[i] = list[i];
+    }
+    return retVal;
+}
+
+/**
  * 레이어의 입출력 데이터를 가지고 있는 클래스입니다.
  */
 class Layer{
@@ -28,9 +40,18 @@ class Layer{
          */
         this.dataN = 0;
         this.inputN = 0;
-        this.outputN = 0;
-        
+        this.outputN = 0;   
     }
+    clone(){
+        let retVal = new Layer();
+        retVal.dx = clone(this.dx);
+        retVal.out = clone(this.out);
+        retVal.dataN = this.dataN;
+        retVal.inputN = this.inputN;
+        retVal.outputN = this.outputN;
+        return retVal;
+    }
+
     syncDataN(dataN){
         if(this.dataN != dataN){
             this.dataN = dataN;
@@ -92,6 +113,17 @@ class FCWeight{
         this.inputN = 0;
         this.outputN = 0;
     }
+    clone(){
+        let retVal = new FCWeight();
+        retVal.w = clone(this.w);
+        retVal.b = clone(this.b);
+        retVal.momntW = clone(this.momntW);
+        retVal.momntB = clone(this.momntB);
+        retVal.size = this.size;
+        retVal.inputN = this.inputN;
+        retVal.outputN = this.outputN;
+        return retVal;
+    }
     syncInputN(inputN){
         if(this.inputN != inputN){
             this.inputN = inputN;
@@ -124,7 +156,169 @@ class FCWeight{
         }
     }
 }
+class ReluLayer{
+    constructor(){
+        this.layer = new Layer();
+    }
+    /**
+     * 
+     * @param {Layer} forwardLayer 
+     */
+    forward(forwardLayer){
+        for(let i = 0; i < this.layer.out.length; i ++){
+            this.layer.out[i] = (forwardLayer.out[i] > 0) * forwardLayer.out[i];
+        }
+        return true;
+    }
+    /**
+     * 
+     * @param {Layer} backwardLayer 
+     */
+    backward(backwardLayer){
+        for(let i = 0; i < this.layer.dx.length; i ++){
+            this.layer.dx[i] = (this.layer.out[i] > 0) * backwardLayer.dx[i];
+        }
+        return true;
+    }
+}
 
+class BatchnormLayer{
+    constructor(){
+        this.layer = new Layer();
+        this.dispersion = [0];
+    }
+    /**
+     * 
+     * @param {Layer} forwardLayer 
+     */
+    forward(forwardLayer){
+        let dataN = this.layer.dataN;
+        // 데이터 하나의 크기
+        // x_array에는 의미 있는 텐서들이 N개가 있고, N개를 나누면 의미 있는 텐서들의 크기가 됨.
+        let outputN = this.layer.outputN;
+
+        for(let outputIndex = 0; outputIndex < outputN; outputIndex++){
+            //평균 계산
+            let mean = 0;
+            for(let i = 0; i < dataN; i++){
+                mean += forwardLayer.out[i * outputN + outputIndex];
+            }
+            mean /= dataN;
+
+            //분산 계산
+            //float dispersion = 0;
+            this.dispersion[outputIndex] = 0;
+            for(let i = 0; i < dataN; i++){
+                this.dispersion[outputIndex] += (forwardLayer.out[i * outputN + outputIndex] - mean) * (forwardLayer.out[i * outputN + outputIndex] - mean);
+            }
+            //dispersion = dispersion / N
+
+            //x 를 평균0 분산1로 변환 계산(out_array에 저장)
+            this.dispersion[outputIndex] = Math.sqrt(this.dispersion[outputIndex] / dataN + 0.00000001);
+
+            for(let i = 0; i < dataN; i++){
+                this.layer.out[i * outputN + outputIndex] = (forwardLayer.out[i * outputN + outputIndex] - mean) / this.dispersion[outputIndex];
+            }
+        }
+    }
+    /**
+     * 
+     * @param {Layer} backwardLayer 
+     */
+    backward(backwardLayer){
+        let outputN = this.layer.outputN;
+        // 따라서 dx.length에 D를 나누면, 의미 있는 텐서들의 데이터 수가 됨.
+        let dataN = this.layer.dataN;
+    
+
+        for(let outputIndex = 0; outputIndex < outputN; outputIndex++){
+            // dx에서 분산 노드로 가는 미분 값
+            let tmp1 = 0;
+            for(let i = 0; i < dataN; i++){
+                tmp1 += this.layer.out[i * outputN + outputIndex] * backwardLayer.dx[i * outputN + outputIndex];
+            }
+            //평균 노드에서 out으로 가는 미분 값
+            let tmp2 = 0;
+            for(let i = 0; i < dataN; i++){
+                tmp2 += tmp1 * this.layer.out[i * outputN + outputIndex] / dataN - backwardLayer.dx[i * outputN + outputIndex];
+            }
+            tmp2 /= dataN;
+        
+            for(let i = 0; i < dataN; i++){
+                this.layer.dx[i * outputN + outputIndex] = (tmp2 - tmp1 * this.layer.out[i * outputN + outputIndex] / dataN + backwardLayer.dx[i * outputN + outputIndex]) / this.dispersion[outputIndex];
+            }
+        }
+    }
+}
+
+
+class FCLayer{
+    constructor(){
+        this.weight = new FCWeight();
+        this.layer = new Layer();
+    }
+    /**
+     * 
+     * @param {Layer} forwardLayer 
+     */
+    forward(forwardLayer){
+        this.forwardLayer = forwardLayer;
+        for(let outputIndex = 0; outputIndex < this.layer.outputN; outputIndex++){
+            for(let dataIndex = 0; dataIndex < this.layer.dataN; dataIndex ++){ 
+                let tmp = 0;
+                for(let productIndex = 0; productIndex < this.layer.inputN; productIndex++){
+                    tmp += forwardLayer.out[dataIndex * this.layer.inputN + productIndex] * this.weight.w[outputIndex + this.layer.outputN * productIndex];
+                }
+                tmp += this.weight.b[outputIndex];
+                this.layer.out[dataIndex * this.layer.outputN + outputIndex] = tmp;
+            }
+        }
+        return true;
+    }
+    /**
+     * 
+     * @param {Layer} backwardLayer 
+     */
+    backward(backwardLayer){
+        this.backwardLayer = backwardLayer;
+
+        for (let dx_index = 0; dx_index < this.layer.dx.length; dx_index++) {
+            var pass_dout_index = Math.floor(dx_index / this.weight.inputN) * this.weight.outputN;
+            var pass_w_index = dx_index % this.weight.inputN * this.weight.outputN;
+            var tmp = 0;
+            for (let productIndex = 0; productIndex < this.weight.outputN; productIndex++) {
+                tmp += backwardLayer.dx[pass_dout_index + productIndex] * this.weight.w[pass_w_index + productIndex];
+            }
+            this.layer.dx[dx_index] = tmp;
+        }
+        return true
+    }
+    update(learning_rate = 0.02){
+        // w update
+        for (let index = 0; index < this.weight.w.length; index++) {
+            var dw1 = index % this.weight.outputN;
+            var dw0 = Math.floor(index / this.weight.outputN);
+            var dw = 0;
+            for (let x0 = 0; x0 < this.forwardLayer.dataN; x0++){
+                dw += this.forwardLayer.out[x0 * this.forwardLayer.outputN + dw0] * this.layer.dx[x0 * this.weight.outputN + dw1];
+            }
+            //ada
+            this.weight.momntW[index] += dw * dw;
+            this.weight.w[index] -= learning_rate * dw / (Math.sqrt(this.weight.momntW[index]) + 0.00000001);
+        }
+        // b update
+        for (let db_index = 0; db_index < this.weight.outputN; db_index ++){
+            var db = 0;
+            for (let dataIndex = 0; dataIndex < this.layer.dataN; dataIndex++ ){
+                db += this.layer.dx[dataIndex * this.weight.outputN + db_index];
+            }
+            //ada
+            this.weight.momntB[db_index] += db * db;
+            this.weight.b[db_index] -= learning_rate * db / (Math.sqrt(this.weight.momntB[db_index]) + 0.00000001);
+        }
+        return true;
+    }
+}
 
 class FCRLayer{
     /**
@@ -133,7 +327,10 @@ class FCRLayer{
     constructor(){
         this.weight = new FCWeight();
         this.layer = new Layer();
-        this.activationDx = [0];
+        //this.activationDx = [0];
+        this.batchnormDx = [0];
+        this.batchnormOut = [0];
+        this.batchnormDout = [0];
         this.dispersion = [0];
     }
     syncDataN(dataN){
@@ -141,6 +338,7 @@ class FCRLayer{
             this.layer.syncDataN(dataN);
             this.batchnormOut = new Array(this.layer.dataN * this.layer.outputN);
             this.batchnormDx = new Array(this.layer.dataN * this.layer.outputN);
+            this.batchnormDout = new Array(this.layer.dataN);
         }
     }
     syncInputN(inputN){
@@ -165,31 +363,32 @@ class FCRLayer{
         this.forwardLayer = forwardLayer;
         for(let outputIndex = 0; outputIndex < this.layer.outputN; outputIndex++){
             let mean = 0;
-            for(let dataIndex = 0; dataIndex < this.layer.dataN; dataIndex ++){
+            for(let dataIndex = 0; dataIndex < this.layer.dataN; dataIndex ++){ 
                 let tmp = 0;
                 for(let productIndex = 0; productIndex < this.layer.inputN; productIndex++){
                     tmp += forwardLayer.out[dataIndex * this.layer.inputN + productIndex] * this.weight.w[outputIndex + this.layer.outputN * productIndex];
                 }
                 tmp += this.weight.b[outputIndex];
-                // ReLU layer
-                tmp *= tmp > 0;
+                // this.layer.out에 임시로 fc 결과 저장.
                 this.layer.out[dataIndex * this.layer.outputN + outputIndex] = tmp;
-                
                 mean += tmp;
             }
             // 평균
             mean /= this.layer.dataN;
 
             // 분산
-            this.dispersion[dataIndex] = 0;
+            this.dispersion[outputIndex] = 0;
             for(let dataIndex = 0; dataIndex < this.layer.dataN; dataIndex ++){
                 this.dispersion[outputIndex] += (this.layer.out[dataIndex * this.layer.outputN + outputIndex] - mean) * (this.layer.out[dataIndex * this.layer.outputN + outputIndex] - mean);
             }
 
-            // bachNorm
-            this.dispersion[outputIndex] = Math.sqrt(this.dispersion[outputIndex] / N + 0.00000001);
+            this.dispersion[outputIndex] = Math.sqrt(this.dispersion[outputIndex] / this.layer.dataN + 0.00000001);
             for(let dataIndex = 0; dataIndex < this.layer.dataN; dataIndex ++){
-                this.layer.out[dataIndex * this.layer.outputN + outputIndex] = (this.layer.out[dataIndex * this.layer.outputN + outputIndex] - mean) / this.dispersion[outputIndex];
+                let index = dataIndex * this.layer.outputN + outputIndex;
+                //batchnorm
+                this.batchnormOut[index] = (this.layer.out[index] - mean) / this.dispersion[outputIndex];
+                //relu
+                this.layer.out[index] = (this.batchnormOut[index] > 0) * this.batchnormOut[index];
             }
         }
 
@@ -228,16 +427,20 @@ class FCRLayer{
         for (let outputIndex = 0; outputIndex < outputN; outputIndex++){
             let tmp1 = 0;
             for(let dataIndex = 0; dataIndex < dataN; dataIndex++){
-                tmp1 += backwardLayer.dx[dataIndex * outputN + outputIndex] * this.layer.out[dataIndex * outputN + outputIndex];
+                let index = dataIndex * outputN + outputIndex;
+                // batchnorm dout == relu dx
+                this.batchnormDout[dataIndex] = (this.layer.out[index] > 0) * backwardLayer.dx[index];
+                tmp1 += this.batchnormDout[dataIndex] * this.batchnormOut[index];
             }
             let tmp2 = 0;
             for(let dataIndex = 0; dataIndex < dataN; dataIndex++){
-                tmp2 += tmp1 * this.layer.out[dataIndex * outputN + outputIndex] / dataN - backwardLayer.dx[dataIndex * outputN + outputIndex];
+                tmp2 += tmp1 * this.batchnormOut[dataIndex * outputN + outputIndex] / dataN - this.batchnormDout[dataIndex];
             }
             tmp2 /= dataN;
             
             for(let dataIndex = 0; dataIndex < dataN; dataIndex++){
-                this.activationDx[dataIndex * outputN + outputIndex] = (tmp2 - tmp1 * this.layer.out[dataIndex * outputN + outputIndex] / dataN + backwardLayer.dx[dataIndex * outputN + outputIndex]) / this.dispersion[outputN];
+                let index = dataIndex * outputN + outputIndex;
+                this.batchnormDx[index] = (tmp2 - tmp1 * this.batchnormOut[index] / dataN + this.batchnormDout[dataIndex]) / this.dispersion[outputIndex];
             }
         }
 
@@ -246,9 +449,7 @@ class FCRLayer{
             var pass_w_index = dx_index % this.weight.inputN * this.weight.outputN;
             var tmp = 0;
             for (let productIndex = 0; productIndex < this.weight.outputN; productIndex++) {
-                // 기존 out이 아님
-                this.activationDx[pass_dout_index + productIndex] = (this.layer.out[pass_dout_index + productIndex] > 0) * backwardLayer.dx[pass_dout_index + productIndex];
-                tmp += this.activationDx[pass_dout_index + productIndex] * this.weight.w[pass_w_index + productIndex];
+                tmp += this.batchnormDx[pass_dout_index + productIndex] * this.weight.w[pass_w_index + productIndex];
             }
             this.layer.dx[dx_index] = tmp;
         }
@@ -262,7 +463,7 @@ class FCRLayer{
             var dw0 = Math.floor(index / this.weight.outputN);
             var dw = 0;
             for (let x0 = 0; x0 < this.forwardLayer.dataN; x0++){
-                dw += this.forwardLayer.out[x0 * this.forwardLayer.outputN + dw0] * this.activationDx[x0 * this.weight.outputN + dw1];
+                dw += this.forwardLayer.out[x0 * this.forwardLayer.outputN + dw0] * this.batchnormDx[x0 * this.weight.outputN + dw1];
             }
             //ada
             this.weight.momntW[index] += dw * dw;
@@ -272,7 +473,7 @@ class FCRLayer{
         for (let db_index = 0; db_index < this.weight.outputN; db_index ++){
             var db = 0;
             for (let dataIndex = 0; dataIndex < this.layer.dataN; dataIndex++ ){
-                db += this.activationDx[dataIndex * this.weight.outputN + db_index];
+                db += this.batchnormDx[dataIndex * this.weight.outputN + db_index];
             }
             //ada
             this.weight.momntB[db_index] += db * db;
@@ -280,6 +481,8 @@ class FCRLayer{
         }
         return true;
     }
+
+    
 }
 
 class OutputLayer{
@@ -352,12 +555,16 @@ class OutputLayer{
         //}
         // out은 그래픽화 하기 위해 activation_dx로 
         this.y = y;
+        this.loss = 0;
+        for(let index = 0; index < this.layer.dataN * this.layer.outputN; index++){
+            this.activationDx[index] = this.layer.out[index] - y[index];
+            this.loss += this.y[index] * Math.log(this.layer.out[index]);
+        }
         for (let dx_index = 0; dx_index < this.layer.dx.length; dx_index++) {
             var pass_dout_index = Math.floor(dx_index / this.weight.inputN) * this.weight.outputN;
             var pass_w_index = dx_index % this.weight.inputN * this.weight.outputN;
             var tmp = 0;
             for (let productIndex = 0; productIndex < this.weight.outputN; productIndex++) {
-                this.activationDx[pass_dout_index + productIndex] = this.layer.out[pass_dout_index + productIndex] - y[pass_dout_index + productIndex];
                 tmp += this.activationDx[pass_dout_index + productIndex] * this.weight.w[pass_w_index + productIndex];
             }
             this.layer.dx[dx_index] = tmp;
@@ -390,7 +597,7 @@ class OutputLayer{
         }
         return true;
     }
-}
+};
 
 var network = {
     inputLayer : new InputLayer(),
@@ -513,13 +720,62 @@ var network = {
             }
             this.outputLayer.update(learning_rate);
         }
-        console.log(this.outputLayer.layer.out);
+        document.getElementById("trainSetOut").innerHTML = this.outputLayer.layer.out
+        document.getElementById("lossOut").innerHTML = this.outputLayer.loss;
     }
 
-}
+};
 // TODO: outputLayer.syncInputN()를 히든 레이어 설정때 해주자!
 network.init();
 
+/*
+var x = [0,0,0,1,1,0,1,1];
+var y = [0,1,1,0,1,0,0,1];
+
+var inputLayer = new InputLayer();
+var outputLayer = new OutputLayer();
+var fcrlayer = new FCRLayer();
+
+inputLayer.syncDataN(4);
+inputLayer.syncOutputN(2);
+inputLayer.copyX(x);
+fcrlayer.syncDataN(4);
+fcrlayer.syncOutputN(2);
+fcrlayer.syncInputN(2);
+outputLayer.syncDataN(4);
+outputLayer.syncInputN(2);
+outputLayer.syncOutputN(2);
+for(let i = 0; i < 8; i ++){
+    outputLayer.layer.dx[i] = Math.random() * 2 - 1;
+}
+var testStack1 = [];
+var testStack2 = [];
+var testStack3 = [];
+var testStack4 = [];
+
+var l1 = new FCLayer();
+l1.layer = fcrlayer.layer.clone();
+l1.weight = fcrlayer.weight.clone();
+var l2 = new BatchnormLayer();
+l2.dispersion = [0,0];
+l2.layer.syncDataN(4);
+l2.layer.syncOutputN(2);
+l2.layer.syncInputN(2);
+var l3 = new ReluLayer();
+l3.layer = l2.layer.clone();
+
+fcrlayer.forward(inputLayer.layer);
+l1.forward(inputLayer.layer);
+l2.forward(l1.layer);
+l3.forward(l2.layer);
+l3.backward(outputLayer.layer);
+l2.backward(l3.layer);
+l1.backward(l2.layer);
+fcrlayer.backward(outputLayer.layer);
+console.log(fcrlayer.layer.dx);
+console.log(l1.layer.dx);
+console.log("test");
+*/
 /*
 x = [0,0,0,1,1,0,1,1]
 y = [0,1,1,0,1,0,0,1]

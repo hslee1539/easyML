@@ -1,8 +1,8 @@
 var trainDataInputer = {
     trainDataInputerElement : document.getElementById("trainingDataInputer"),
-    xCount : 2,
-    yCount : 2,
-    setCount : 4,
+    xCount : 0,
+    yCount : 0,
+    setCount : 0,
 
     /**
      * xCount, yCount, setCount 내용으로 html 요소들을 갱신합니다.
